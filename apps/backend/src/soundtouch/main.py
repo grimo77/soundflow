@@ -11,7 +11,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from soundtouch.api import devices, presets, radio, zones, system, spotify
+from soundtouch.api import devices, presets, radio, zones, system, spotify, cloud
+from soundtouch.api import setup as setup_api
 from soundtouch.api import websocket as ws_router
 from soundtouch.ws import device_poller
 from soundtouch.discovery import DeviceDiscovery
@@ -53,6 +54,8 @@ app.include_router(zones.router, prefix="/api/zones", tags=["zones"])
 app.include_router(system.router, prefix="/api/system", tags=["system"])
 app.include_router(spotify.router, prefix="/api/spotify", tags=["spotify"])
 app.include_router(ws_router.router, tags=["websocket"])
+app.include_router(setup_api.router, prefix="/api/setup", tags=["setup"])
+app.include_router(cloud.router, prefix="/cloudws", tags=["cloud"])
 
 
 @app.get("/health")

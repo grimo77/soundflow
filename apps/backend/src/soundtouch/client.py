@@ -200,3 +200,31 @@ class SoundTouchClient:
 
     async def set_name(self, name: str):
         await self.post("/name", f"<name>{name}</name>")
+
+    async def set_cloud_server(self, host: str):
+        """
+        Redirect the speaker's cloud server to a local address.
+        After this call the speaker contacts host instead of cloudws.bose.io.
+        host format: '192.168.1.100:7777'
+        """
+        await self.post("/setServerAddress", f"<server>{host}</server>")
+
+    async def get_cloud_server(self) -> str:
+        """Read currently configured cloud server address."""
+        try:
+            el = await self.get("/getServerAddress")
+            return el.findtext("server", "")
+        except Exception:
+            return ""
+
+    async def set_spotify_account(self, email: str, blob_id: str = "", token: str = "") -> None:
+        """
+        Link a Spotify account to the speaker so it can play Spotify sources.
+        """
+        body = f"""<credentials>
+  <source>SPOTIFY</source>
+  <sourceAccount>{email}</sourceAccount>
+  <blobId>{blob_id}</blobId>
+  <token>{token}</token>
+</credentials>"""
+        await self.post("/setCredentials", body)
