@@ -79,7 +79,7 @@ Alle Einstellungen werden über Umgebungsvariablen (Prefix `STOC_`) oder eine `/
 
 | Variable | Standard | Beschreibung |
 |----------|----------|-------------|
-| `STOC_PORT` | `7777` | API & Web-Port |
+| `STOC_PORT` | `7777` | Web-UI & API Port — ändern falls belegt |
 | `STOC_DISCOVERY_ENABLED` | `true` | SSDP/UPnP Auto-Discovery |
 | `STOC_DISCOVERY_TIMEOUT` | `5` | Scan-Timeout in Sekunden |
 | `STOC_MANUAL_DEVICE_IPS` | `""` | Kommagetrennte Fallback-IPs |

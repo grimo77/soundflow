@@ -8,12 +8,29 @@ services:
     restart: unless-stopped
     network_mode: host                # Required for SSDP/UPnP discovery
     volumes:
-      - soundtouch-data:/data
+      - soundflow-data:/data
     environment:
       - TZ=Europe/Berlin              # Your timezone
+
+      # ── Port ──────────────────────────────────────────────────────────────
+      # Web-UI and API port. Change if 7777 is already in use.
+      # After changing, open: http://localhost:<PORT>
+      - STOC_PORT=7777
+
+      # ── Device Discovery ──────────────────────────────────────────────────
       - STOC_DISCOVERY_ENABLED=true
-      # - STOC_MANUAL_DEVICE_IPS=192.168.1.50,192.168.1.51   # Optional fallback IPs
+      - STOC_DISCOVERY_TIMEOUT=5
+
+      # Manual fallback IPs (comma-separated) if SSDP does not find speakers:
+      # - STOC_MANUAL_DEVICE_IPS=192.168.1.50,192.168.1.51
+
+      # ── GitHub update check ───────────────────────────────────────────────
       # - STOC_GITHUB_REPO=grimo77/SoundFlow
 
+      # ── Spotify OAuth (optional) ──────────────────────────────────────────
+      # Create a free app at https://developer.spotify.com/dashboard
+      # - STOC_SPOTIFY_CLIENT_ID=your_client_id
+      # - STOC_SPOTIFY_CLIENT_SECRET=your_client_secret
+
 volumes:
-  soundtouch-data:
+  soundflow-data:

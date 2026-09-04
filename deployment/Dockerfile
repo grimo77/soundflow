@@ -41,10 +41,9 @@ COPY deployment/serve_static.py ./
 RUN mkdir -p /data
 VOLUME ["/data"]
 
-EXPOSE 7777
+EXPOSE ${STOC_PORT:-7777}
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
-  CMD curl -f http://localhost:7777/health || exit 1
+  CMD curl -f http://localhost:${STOC_PORT:-7777}/health || exit 1
 
-CMD ["python", "-m", "uvicorn", "soundtouch.main:app", \
-     "--host", "0.0.0.0", "--port", "7777", "--workers", "1"]
+CMD ["sh", "-c", "uvicorn soundtouch.main:app --host 0.0.0.0 --port ${STOC_PORT:-7777} --workers 1"]

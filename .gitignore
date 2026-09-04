@@ -1,0 +1,27 @@
+## Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+dist/
+.mypy_cache/
+.ruff_cache/
+
+## Node / Frontend
+node_modules/
+.out/
+apps/frontend/dist/
+
+## Data / secrets
+/data/
+.env
+*.db
+*.bak
+
+## Docker
+.dockerignore
+
+## IDE
+.vscode/settings.json
+.idea/
+*.swp
