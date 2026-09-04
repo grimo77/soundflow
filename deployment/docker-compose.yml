@@ -1,0 +1,19 @@
+services:
+  soundflow:
+    image: ghcr.io/grimo77/soundflow:stable
+    # build:                          # Uncomment to build locally:
+    #   context: ..
+    #   dockerfile: deployment/Dockerfile
+    container_name: soundflow
+    restart: unless-stopped
+    network_mode: host                # Required for SSDP/UPnP discovery
+    volumes:
+      - soundtouch-data:/data
+    environment:
+      - TZ=Europe/Berlin              # Your timezone
+      - STOC_DISCOVERY_ENABLED=true
+      # - STOC_MANUAL_DEVICE_IPS=192.168.1.50,192.168.1.51   # Optional fallback IPs
+      # - STOC_GITHUB_REPO=grimo77/SoundFlow
+
+volumes:
+  soundtouch-data:
