@@ -5,7 +5,7 @@ WORKDIR /app/frontend
 COPY apps/frontend/package.json apps/frontend/package-lock.json* ./
 RUN npm install --frozen-lockfile 2>/dev/null || npm install
 COPY apps/frontend/ .
-RUN npm run build --outDir /app/dist
+RUN npm run build
 
 # ── Stage 2: Production Image ────────────────────────────────────────────────
 FROM python:3.12-slim
