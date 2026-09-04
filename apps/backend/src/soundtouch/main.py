@@ -64,7 +64,8 @@ async def health():
 
 
 # Serve pre-built React frontend in production (Docker)
-_static = os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "static")
+# Static dir: /app/static (Docker) or relative in dev
+_static = os.environ.get("STATIC_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "static"))
 if os.path.isdir(_static):
     from fastapi.responses import FileResponse
 

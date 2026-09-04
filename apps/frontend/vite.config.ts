@@ -6,10 +6,12 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": "http://localhost:7777",
+      "/ws": { target: "ws://localhost:7777", ws: true },
+      "/cloudws": "http://localhost:7777",
     },
   },
   build: {
-    outDir: "../../.out/dist",
+    outDir: "dist",
     emptyOutDir: true,
   },
 });
