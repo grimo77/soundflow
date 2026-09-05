@@ -170,10 +170,24 @@ async def streaming_sources():
     return JSONResponse({"sources": _account_sources()})
 
 
+# ── Streaming catch-all (log everything the speaker asks for) ──────────────────
+
+@router.api_route("/streaming/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def streaming_catchall(path: str, request: Request):
+    body = b""
+    try:
+        body = await request.body()
+    except Exception:
+        pass
+    logger.info("streaming catch-all: %s /streaming/%s (body: %d bytes)",
+                request.method, path, len(body))
+    return JSONResponse({"status": "OK"})
+
+
 @router.get("/marge/{path:path}")
 @router.post("/marge/{path:path}")
 async def marge_catchall(path: str, request: Request):
-    logger.debug("marge catch-all: /%s %s", path, request.method)
+    logger.info("marge catch-all: /%s %s", request.method, path)
     return JSONResponse({"status": "OK"})
 
 
