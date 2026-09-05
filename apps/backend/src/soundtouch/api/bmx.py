@@ -75,6 +75,8 @@ async def scmudc(device_id: str, request: Request):
         try:
             event = json.loads(body)
             logger.info("scmudc event from %s: %s", device_id, _summarize(event))
+            # Full payload logging for protocol research (first 3000 chars)
+            logger.info("scmudc FULL from %s: %s", device_id, json.dumps(event)[:3000])
         except Exception:
             logger.debug("scmudc raw from %s: %d bytes", device_id, len(body))
 
