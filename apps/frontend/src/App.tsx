@@ -38,7 +38,7 @@ export default function App() {
         <nav className="sidebar">
           <div className="logo">
             <span className="logo-icon">🔊</span>
-            <span className="logo-text">SoundTouch<br /><small>Open Cloud</small></span>
+            <span className="logo-text">SoundFlow<br /><small>Bose Local Cloud</small></span>
           </div>
           <NavLink to="/" end><LayoutDashboard size={18} /> Dashboard</NavLink>
           <NavLink to="/radio"><Radio size={18} /> Radio</NavLink>

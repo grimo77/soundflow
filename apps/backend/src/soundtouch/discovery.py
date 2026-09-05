@@ -104,4 +104,4 @@ class DeviceDiscovery:
                 logger.info("Found device: %s (%s) at %s", info["name"], info["model"], ip)
                 self._known.add(device_id)
         except Exception as e:
-            logger.debug("Could not reach %s: %s", ip, e)
+            logger.warning("Could not register %s: %s", ip, e)

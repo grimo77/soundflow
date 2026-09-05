@@ -46,12 +46,27 @@ class SoundTouchClient:
 
     async def get_info(self) -> dict:
         el = await self.get("/info")
+        # deviceID is an ATTRIBUTE on <info>, not a child element
+        device_id = el.get("deviceID", "") or el.findtext("deviceID", "")
+        # firmware lives inside components/component/softwareVersion
+        firmware = ""
+        sw = el.find(".//softwareVersion")
+        if sw is not None and sw.text:
+            firmware = sw.text.split(" ")[0]  # keep just the version number
+        # MAC: prefer the SCM networkInfo, fall back to any macAddress
+        mac = ""
+        for ni in el.findall("networkInfo"):
+            mac_el = ni.find("macAddress")
+            if mac_el is not None and mac_el.text:
+                mac = mac_el.text
+                if ni.get("type") == "SCM":
+                    break
         return {
-            "id": el.findtext("deviceID", ""),
+            "id": device_id,
             "name": el.findtext("name", ""),
             "model": el.findtext("type", ""),
-            "mac": el.findtext("networkInfo/macAddress", ""),
-            "firmware": el.findtext("softwareVersion", ""),
+            "mac": mac,
+            "firmware": firmware,
             "ip": self.ip,
         }
 
