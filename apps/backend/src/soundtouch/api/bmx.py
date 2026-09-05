@@ -175,6 +175,80 @@ async def account_devices(account_id: str):
     return xml_response("<devices/>")
 
 
+# ── Full account sync — THE key endpoint that activates sources ───────────────
+# The speaker calls this to rebuild its complete state: sources, devices, and
+# presets. The <sources> block is what registers LOCAL_INTERNET_RADIO etc. in
+# the speaker's Sources.xml. Without it, sources stay INVALID.
+
+def _source_block(source_id: str, provider_id: str, name: str = "") -> str:
+    return f"""    <source id="{source_id}" type="Audio">
+      <createdOn>2018-08-11T08:55:41.000+00:00</createdOn>
+      <credential type="token">c291bmRmbG93</credential>
+      <name>{_esc(name)}</name>
+      <sourceproviderid>{provider_id}</sourceproviderid>
+      <sourcename>{_esc(name)}</sourcename>
+      <sourceSettings/>
+      <updatedOn>2019-07-20T17:48:31.000+00:00</updatedOn>
+      <username>{_esc(name)}</username>
+    </source>
+"""
+
+
+@router.get("/streaming/account/{account_id}/full")
+async def account_full(account_id: str):
+    """
+    Complete account sync. The <sources> block activates each source in the
+    speaker's persistence so /select accepts them. Presets are embedded per
+    device so the physical buttons work.
+    """
+    ip = get_local_ip()
+
+    # Sources block — activates the sources
+    sources = (
+        _source_block("19989313", "25", "TuneIn") +      # TuneIn
+        _source_block("19989621", "15", "") +            # Spotify
+        _source_block("19989314", "25", "")              # LOCAL_INTERNET_RADIO via TuneIn provider
+    )
+
+    # Devices with their presets
+    devices_xml = ""
+    try:
+        async with aiosqlite.connect(settings.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM devices") as cur:
+                devs = await cur.fetchall()
+        for d in devs:
+            did = d["id"]
+            presets = await _load_presets(did)
+            presets_body = "".join(_preset_xml(p) for p in presets) if presets else ""
+            devices_xml += f"""  <device deviceid="{did}">
+    <attachedProduct><name>{_esc(d['model'])}</name></attachedProduct>
+    <createdOn>2018-08-11T08:55:25.000+00:00</createdOn>
+    <firmwareVersion>{_esc(d['firmware'])}</firmwareVersion>
+    <ipaddress>{_esc(d['ip'])}</ipaddress>
+    <name>{_esc(d['name'])}</name>
+    <presets>
+{presets_body}    </presets>
+    <recents/>
+    <serialNumber>{_esc(did)}</serialNumber>
+    <updatedOn>2018-08-11T08:55:25.000+00:00</updatedOn>
+  </device>
+"""
+    except Exception as e:
+        logger.warning("account_full devices error: %s", e)
+
+    xml = f"""<account id="{account_id}">
+  <accountStatus>active</accountStatus>
+  <devices>
+{devices_xml}  </devices>
+  <mode>global</mode>
+  <preferredLanguage>de</preferredLanguage>
+  <sources>
+{sources}  </sources>
+</account>"""
+    return xml_response(xml)
+
+
 # ── BMX registry ──────────────────────────────────────────────────────────────
 
 @router.get("/bmx/registry/v1/services")
