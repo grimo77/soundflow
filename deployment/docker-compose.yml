@@ -31,6 +31,7 @@ services:
       # Create a free app at https://developer.spotify.com/dashboard
       # - STOC_SPOTIFY_CLIENT_ID=your_client_id
       # - STOC_SPOTIFY_CLIENT_SECRET=your_client_secret
+      # - STOC_SPOTIFY_REDIRECT_URI=http://127.0.0.1:7777/api/spotify/callback
 
 volumes:
   soundflow-data:

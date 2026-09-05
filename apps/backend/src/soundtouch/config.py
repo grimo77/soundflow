@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     github_repo: str = "grimo77/SoundFlow"
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
+    # Fixed redirect URI for Spotify OAuth. Spotify only allows http:// with
+    # 127.0.0.1 (not LAN IPs), so this defaults to loopback. Override if needed.
+    spotify_redirect_uri: str = "http://127.0.0.1:7777/api/spotify/callback"
 
     class Config:
         env_prefix = "STOC_"

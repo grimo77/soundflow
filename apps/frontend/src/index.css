@@ -798,3 +798,27 @@ input:focus, select:focus { border-color: var(--accent); }
 }
 
 .done-row strong { color: var(--text); }
+
+/* ── Spotify Manual Auth ── */
+.manual-auth {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: left;
+  width: 100%;
+}
+.auth-step {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+.auth-step strong { color: var(--text); }
+.auth-step code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--surface-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+  color: var(--accent);
+  word-break: break-all;
+}

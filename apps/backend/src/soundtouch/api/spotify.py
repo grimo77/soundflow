@@ -107,7 +107,7 @@ async def spotify_auth(request: Request):
     verifier, challenge = _pkce_pair()
     _pkce_store[state] = verifier
 
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/spotify/callback"
+    redirect_uri = settings.spotify_redirect_uri
     params = {
         "response_type": "code",
         "client_id": settings.spotify_client_id,
@@ -122,13 +122,40 @@ async def spotify_auth(request: Request):
     return RedirectResponse(url)
 
 
+@router.get("/auth_url")
+async def spotify_auth_url():
+    """Return the Spotify authorization URL as JSON (for the manual flow)."""
+    if not settings.spotify_client_id:
+        raise HTTPException(400, "STOC_SPOTIFY_CLIENT_ID nicht konfiguriert")
+
+    state = secrets.token_urlsafe(16)
+    verifier, challenge = _pkce_pair()
+    _pkce_store[state] = verifier
+
+    from urllib.parse import urlencode
+    params = {
+        "response_type": "code",
+        "client_id": settings.spotify_client_id,
+        "scope": "user-read-playback-state user-modify-playback-state streaming",
+        "redirect_uri": settings.spotify_redirect_uri,
+        "state": state,
+        "code_challenge_method": "S256",
+        "code_challenge": challenge,
+    }
+    return {
+        "url": f"{SPOTIFY_AUTH_URL}?{urlencode(params)}",
+        "state": state,
+        "redirect_uri": settings.spotify_redirect_uri,
+    }
+
+
 @router.get("/callback")
 async def spotify_callback(request: Request, code: str, state: str):
     verifier = _pkce_store.pop(state, None)
     if not verifier:
         raise HTTPException(400, "Invalid state — try connecting again")
 
-    redirect_uri = str(request.base_url).rstrip("/") + "/api/spotify/callback"
+    redirect_uri = settings.spotify_redirect_uri
 
     try:
         async with httpx.AsyncClient() as client:
@@ -157,6 +184,56 @@ async def spotify_callback(request: Request, code: str, state: str):
         await db.commit()
 
     return RedirectResponse("/?spotify=connected")
+
+
+class ManualCodeBody(BaseModel):
+    code: str
+    state: str = ""
+
+
+@router.post("/manual_exchange")
+async def spotify_manual_exchange(body: ManualCodeBody):
+    """
+    Manual OAuth code exchange — for setups without a reachable redirect URI.
+    The user authorizes at Spotify, copies the 'code' from the redirected URL,
+    and pastes it here. Works even when the redirect points to 127.0.0.1.
+    """
+    # Use the most recent verifier if state matches, else the last stored one
+    verifier = _pkce_store.pop(body.state, None)
+    if not verifier and _pkce_store:
+        # Fall back to the last stored verifier
+        verifier = list(_pkce_store.values())[-1]
+        _pkce_store.clear()
+    if not verifier:
+        raise HTTPException(400, "Keine aktive Autorisierung. Bitte erneut auf 'Verbinden' klicken.")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.post(SPOTIFY_TOKEN_URL, data={
+                "grant_type": "authorization_code",
+                "code": body.code.strip(),
+                "redirect_uri": settings.spotify_redirect_uri,
+                "client_id": settings.spotify_client_id,
+                "code_verifier": verifier,
+            })
+            r.raise_for_status()
+            data = r.json()
+    except Exception as e:
+        raise HTTPException(502, f"Spotify token exchange failed: {e}")
+
+    access_token = data["access_token"]
+    refresh_token = data.get("refresh_token", "")
+    expires_at = time.time() + data["expires_in"]
+
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute("DELETE FROM spotify_token")
+        await db.execute(
+            "INSERT INTO spotify_token (access_token, refresh_token, expires_at) VALUES (?,?,?)",
+            (access_token, refresh_token, expires_at)
+        )
+        await db.commit()
+
+    return {"ok": True}
 
 
 @router.get("/status")

@@ -32,9 +32,42 @@ export default function SpotifyPage() {
   const [tracks, setTracks] = useState<SpotifyTrack[]>([]);
   const [searching, setSearching] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [authUrl, setAuthUrl] = useState<string>("");
+  const [authState, setAuthState] = useState<string>("");
+  const [authCode, setAuthCode] = useState<string>("");
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(null), 3000); };
+
+  const startAuth = async () => {
+    try {
+      const r = await fetch("/api/spotify/auth_url");
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail);
+      setAuthUrl(data.url);
+      setAuthState(data.state);
+    } catch (e: unknown) {
+      showToast(`Fehler: ${e instanceof Error ? e.message : "Unbekannt"}`);
+    }
+  };
+
+  const submitCode = async () => {
+    try {
+      const r = await fetch("/api/spotify/manual_exchange", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code: authCode.trim(), state: authState }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail);
+      showToast("✅ Spotify verbunden!");
+      setAuthUrl("");
+      setAuthCode("");
+      loadStatus();
+    } catch (e: unknown) {
+      showToast(`Fehler: ${e instanceof Error ? e.message : "Unbekannt"}`);
+    }
+  };
 
   const loadStatus = () =>
     fetch("/api/spotify/status").then((r) => r.json()).then(setStatus).catch(() => {});
@@ -106,15 +139,51 @@ export default function SpotifyPage() {
         <div className="spotify-connect card">
           <div className="spotify-logo">🎵</div>
           <h3>Spotify verbinden</h3>
-          <p>Verbinde deinen Spotify-Account, um direkt auf deinen SoundTouch-Lautsprechern zu suchen und abzuspielen.</p>
-          <div className="info-box">
-            ℹ Für den OAuth-Flow benötigst du eine <strong>Spotify Developer App</strong> mit Client ID und Secret
-            in <code>STOC_SPOTIFY_CLIENT_ID</code> und <code>STOC_SPOTIFY_CLIENT_SECRET</code>.
-            Alternativ: Spotify-Presets direkt über die Preset-Seite per URI eintragen.
-          </div>
-          <a href="/api/spotify/auth" className="btn-primary" style={{ textDecoration: "none", display: "inline-flex", gap: 6 }}>
-            Mit Spotify verbinden
-          </a>
+          <p>Verbinde deinen Spotify-Account, um direkt in SoundFlow zu suchen und auf deinen Lautsprechern abzuspielen.</p>
+
+          {!authUrl ? (
+            <>
+              <div className="info-box">
+                ℹ Benötigt eine <strong>Spotify Developer App</strong> mit Redirect URI{" "}
+                <code>http://127.0.0.1:7777/api/spotify/callback</code> und aktivierter <strong>Web API</strong>.
+              </div>
+              <button className="btn-primary" onClick={startAuth} style={{ display: "inline-flex", gap: 6 }}>
+                Verbindung starten
+              </button>
+            </>
+          ) : (
+            <div className="manual-auth">
+              <div className="auth-step">
+                <strong>Schritt 1:</strong> Öffne den Autorisierungs-Link und melde dich bei Spotify an:
+                <a href={authUrl} target="_blank" rel="noreferrer" className="btn-primary" style={{ display: "inline-flex", gap: 6, marginTop: 8, textDecoration: "none" }}>
+                  Bei Spotify autorisieren ↗
+                </a>
+              </div>
+              <div className="auth-step">
+                <strong>Schritt 2:</strong> Nach dem Klick auf "Agree" wirst du auf eine Seite weitergeleitet
+                die evtl. nicht lädt (127.0.0.1). Das ist normal! Kopiere den <code>code</code> Parameter
+                aus der Adressleiste des Browsers.
+                <div className="info-box" style={{ marginTop: 8, fontSize: 11 }}>
+                  Beispiel-URL: <code>http://127.0.0.1:7777/api/spotify/callback?code=<strong>AQD8x...HIER</strong>&state=...</code><br />
+                  Kopiere nur den Teil zwischen <code>code=</code> und <code>&state</code>.
+                </div>
+              </div>
+              <div className="auth-step">
+                <strong>Schritt 3:</strong> Code hier einfügen:
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <input
+                    value={authCode}
+                    onChange={(e) => setAuthCode(e.target.value)}
+                    placeholder="AQD8x..."
+                    style={{ flex: 1 }}
+                  />
+                  <button className="btn-primary" onClick={submitCode} disabled={!authCode.trim()}>
+                    Verbinden
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
