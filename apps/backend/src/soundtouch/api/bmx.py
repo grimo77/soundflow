@@ -249,6 +249,30 @@ async def account_full(account_id: str):
     return xml_response(xml)
 
 
+# ── Provider settings / streaming token / blacklist (boot handshake) ──────────
+
+@router.get("/streaming/account/{account_id}/provider_settings")
+async def provider_settings(account_id: str):
+    """Empty 200 per spec."""
+    return xml_response("<providerSettings/>")
+
+
+@router.get("/streaming/device/{device_id}/streaming_token")
+async def streaming_token(device_id: str):
+    """Empty body with an Authorization header per spec."""
+    return Response(
+        status_code=200,
+        media_type=BOSE_XML_CT,
+        headers={"Authorization": "c291bmRmbG93L3Rva2VuK2xvY2Fs"},
+    )
+
+
+@router.get("/v1/blacklist/{device_id}")
+async def blacklist(device_id: str):
+    """Spec: always 404 (device not blacklisted)."""
+    return Response(status_code=404)
+
+
 # ── BMX registry ──────────────────────────────────────────────────────────────
 
 @router.get("/bmx/registry/v1/services")
