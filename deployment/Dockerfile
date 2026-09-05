@@ -1,9 +1,12 @@
 # ── Stage 1: Build Frontend ─────────────────────────────────────────────────
-FROM node:20-alpine AS frontend-builder
+# Pinned to the native build platform ($BUILDPLATFORM) so npm never runs under
+# slow QEMU emulation. The frontend output is static, so it works on any arch.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY apps/frontend/package.json apps/frontend/package-lock.json* ./
-RUN npm install --frozen-lockfile 2>/dev/null || npm install
+RUN npm config set fetch-timeout 300000 && \
+    (npm ci 2>/dev/null || npm install)
 COPY apps/frontend/ .
 RUN npm run build
 
