@@ -1,10 +1,13 @@
 import time
+import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import aiosqlite
 from soundtouch.client import SoundTouchClient
 from soundtouch.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -97,13 +100,33 @@ class PlayUrlBody(BaseModel):
 
 @router.post("/{device_id}/play_url")
 async def play_url(device_id: str, body: PlayUrlBody):
+    """
+    Play an internet radio stream.
+    Primary: DLNA/UPnP renderer (plays arbitrary URLs reliably).
+    Fallback: SoundTouch /speaker play_info.
+    """
     ip = await _get_device_ip(device_id)
-    client = SoundTouchClient(ip)
+    errors = []
+
+    # Try DLNA first — this is the reliable path for arbitrary streams
     try:
-        await client.play_url(body.url, body.name)
-        return {"ok": True}
+        from soundtouch.dlna import DLNARenderer
+        renderer = DLNARenderer(ip)
+        await renderer.play_url(body.url, body.name)
+        return {"ok": True, "method": "dlna"}
     except Exception as e:
-        raise HTTPException(502, str(e))
+        errors.append(f"DLNA: {e}")
+        logger.info("DLNA playback failed for %s, trying SoundTouch API: %s", ip, e)
+
+    # Fallback: SoundTouch native /speaker endpoint
+    try:
+        client = SoundTouchClient(ip)
+        await client.play_url(body.url, body.name)
+        return {"ok": True, "method": "soundtouch"}
+    except Exception as e:
+        errors.append(f"SoundTouch: {e}")
+
+    raise HTTPException(502, "Wiedergabe fehlgeschlagen. " + " | ".join(errors))
 
 
 @router.post("/{device_id}/refresh")
