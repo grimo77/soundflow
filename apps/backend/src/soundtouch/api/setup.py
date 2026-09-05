@@ -79,11 +79,15 @@ async def get_cloud_server(device_id: str):
     client = SoundTouchClient(row["ip"])
     try:
         server = await client.get_cloud_server()
-        local = f"{get_local_ip()}:{settings.port}"
+        local_host = f"{get_local_ip()}:{settings.port}"
+        local_url = f"http://{local_host}"
+        # margeURL may or may not include the http:// prefix
+        normalized = server.replace("http://", "").replace("https://", "").rstrip("/")
+        is_redirected = normalized == local_host
         return {
-            "current": server,
-            "local": local,
-            "is_redirected": server == local,
+            "current": server or "cloudws.bose.io",
+            "local": local_host,
+            "is_redirected": is_redirected,
         }
     except Exception as e:
         raise HTTPException(502, str(e))

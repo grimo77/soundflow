@@ -218,19 +218,52 @@ class SoundTouchClient:
 
     async def set_cloud_server(self, host: str):
         """
-        Redirect the speaker's cloud server to a local address.
-        After this call the speaker contacts host instead of cloudws.bose.io.
+        Redirect the speaker's cloud (Marge) server to a local address.
+        Different firmwares expose different endpoints, so we try the known
+        variants in order until one succeeds.
         host format: '192.168.1.100:7777'
         """
-        await self.post("/setServerAddress", f"<server>{host}</server>")
+        url = f"http://{host}"
+        # Try the known endpoint variants across firmware versions
+        attempts = [
+            ("/setMargeAccount", f"<marge><url>{url}</url></marge>"),
+            ("/marge", f"<marge><url>{url}</url></marge>"),
+            ("/setServerAddress", f"<server>{host}</server>"),
+        ]
+        last_error = None
+        for path, body in attempts:
+            try:
+                await self.post(path, body)
+                return path  # success
+            except Exception as e:
+                last_error = e
+                continue
+        raise RuntimeError(
+            f"Kein unterstützter Redirect-Endpunkt gefunden. "
+            f"Dein Gerät nutzt vermutlich DNS-Redirect. Letzter Fehler: {last_error}"
+        )
 
     async def get_cloud_server(self) -> str:
-        """Read currently configured cloud server address."""
+        """
+        Read the currently configured cloud server address.
+        Modern firmwares expose it as <margeURL> inside /info.
+        """
         try:
-            el = await self.get("/getServerAddress")
-            return el.findtext("server", "")
+            el = await self.get("/info")
+            marge = el.findtext("margeURL", "")
+            if marge:
+                return marge
         except Exception:
-            return ""
+            pass
+        return ""
+
+    async def get_supported_urls(self) -> list[str]:
+        """Return the list of endpoints this specific device supports."""
+        try:
+            el = await self.get("/supportedURLs")
+            return [u.get("location", "") for u in el.findall("URL")]
+        except Exception:
+            return []
 
     async def set_spotify_account(self, email: str, blob_id: str = "", token: str = "") -> None:
         """
