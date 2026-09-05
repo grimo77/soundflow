@@ -6,6 +6,7 @@ from pydantic import BaseModel
 import aiosqlite
 from soundtouch.client import SoundTouchClient
 from soundtouch.config import settings
+from soundtouch.network import get_local_ip
 
 logger = logging.getLogger(__name__)
 
@@ -96,37 +97,51 @@ async def send_key(device_id: str, body: KeyBody):
 class PlayUrlBody(BaseModel):
     url: str
     name: str = "Stream"
+    image_url: str = ""
 
 
 @router.post("/{device_id}/play_url")
 async def play_url(device_id: str, body: PlayUrlBody):
     """
     Play an internet radio stream.
-    Primary: DLNA/UPnP renderer (plays arbitrary URLs reliably).
-    Fallback: SoundTouch /speaker play_info.
+
+    Uses the LOCAL_INTERNET_RADIO source with SoundFlow acting as the radio
+    adapter (replacing Bose's content.api.bose.io). The speaker fetches our
+    adapter URL, which 302-redirects it to the real stream. This is the only
+    method that plays arbitrary streams continuously on all SoundTouch models
+    and keeps working after Bose's cloud shuts down.
     """
+    import base64
+    import json
+
     ip = await _get_device_ip(device_id)
-    errors = []
 
-    # Try DLNA first — this is the reliable path for arbitrary streams
-    try:
-        from soundtouch.dlna import DLNARenderer
-        renderer = DLNARenderer(ip)
-        await renderer.play_url(body.url, body.name)
-        return {"ok": True, "method": "dlna"}
-    except Exception as e:
-        errors.append(f"DLNA: {e}")
-        logger.info("DLNA playback failed for %s, trying SoundTouch API: %s", ip, e)
+    # Build the base64 stream descriptor exactly like Bose does
+    descriptor = {
+        "streamUrl": body.url,
+        "name": body.name,
+        "imageUrl": body.image_url,
+    }
+    data = base64.b64encode(json.dumps(descriptor).encode()).decode()
 
-    # Fallback: SoundTouch native /speaker endpoint
+    # Point the location at SoundFlow's own adapter endpoint
+    local = f"{get_local_ip()}:{settings.port}"
+    location = (
+        f"http://{local}/core02/svc-bmx-adapter-orion/prod/orion/station?data={data}"
+    )
+
+    content_item = (
+        f'<ContentItem source="LOCAL_INTERNET_RADIO" type="stationurl" '
+        f'location="{location}" sourceAccount="" isPresetable="true">'
+        f'<itemName>{body.name}</itemName></ContentItem>'
+    )
+
     try:
         client = SoundTouchClient(ip)
-        await client.play_url(body.url, body.name)
-        return {"ok": True, "method": "soundtouch"}
+        await client.post("/select", content_item)
+        return {"ok": True, "method": "local_internet_radio"}
     except Exception as e:
-        errors.append(f"SoundTouch: {e}")
-
-    raise HTTPException(502, "Wiedergabe fehlgeschlagen. " + " | ".join(errors))
+        raise HTTPException(502, f"Wiedergabe fehlgeschlagen: {e}")
 
 
 @router.post("/{device_id}/refresh")
