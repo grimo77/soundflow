@@ -1,29 +1,29 @@
 """
-BMX (Bose Media eXchange) cloud emulation.
+BMX (Bose Media eXchange) cloud emulation — spec-conformant.
 
-This is the heart of SoundFlow's cloud replacement. After Bose shuts down its
-cloud (2026-05-06), speakers can no longer reach the BMX registry, the Marge
-account service, or the scmudc event stream — which breaks presets and radio.
+Reimplements the Bose SoundTouch streaming cloud so speakers keep working after
+the official shutdown (2026-05-06). Endpoint shapes and XML formats follow the
+community-reconstructed OpenAPI spec (julius-d/ueberboese-api), saved at
+docs/bose-cloud-api-reference.yaml.
 
-SoundFlow reimplements these endpoints locally so the speaker firmware keeps
-working. The endpoint shapes are based on the community-reconstructed spec
-(julius-d/ueberboese-api, SoundCork, AfterTouch).
+The speaker contacts four API domains, all served here:
+  - marge:  account, source providers, presets, recents, devices
+  - stats:  telemetry (we swallow it)
+  - bmx:    streaming radio services
+  - swupdate: firmware (we always say up-to-date)
 
-Key endpoints the speaker calls on boot and during playback:
-  GET  /bmx/registry/v1/services          → catalog of available cloud services
-  GET  /marge/streaming/sourceproviders   → list of music services
-  POST /v1/scmudc/{deviceId}              → event envelope (device → cloud)
-  GET  /streaming/account/{acct}/device/  → account bootstrap
+CRITICAL INSIGHT: The speaker rebuilds its Sources.xml from the presets and
+source-providers responses on boot. Every source referenced by a preset must
+also be declared, or the speaker reports INVALID_SOURCE / UNKNOWN_SOURCE_ERROR.
 
-The scmudc ("SoundTouch Cloud Multi-Device Communication") stream is how the
-speaker reports state and receives commands. We must answer it (not 405) or
-the speaker considers the cloud dead and disables cloud-backed sources.
+All responses use Content-Type application/vnd.bose.streaming-v1.2+xml.
 """
 
 import json
 import logging
 import time
 
+import aiosqlite
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -33,24 +33,159 @@ from soundtouch.network import get_local_ip
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
+BOSE_XML_CT = "application/vnd.bose.streaming-v1.2+xml"
+
+
+def xml_response(content: str, status: int = 200) -> Response:
+    if not content.lstrip().startswith("<?xml"):
+        content = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n' + content
+    return Response(content=content, media_type=BOSE_XML_CT, status_code=status,
+                    headers={"ETag": str(int(time.time() * 1000))})
+
 
 def _base_url() -> str:
     return f"http://{get_local_ip()}:{settings.port}"
 
 
-# ── BMX Registry ──────────────────────────────────────────────────────────────
-# The speaker asks the registry where to find each cloud service. We point every
-# service back at SoundFlow itself.
+# ── Source providers ──────────────────────────────────────────────────────────
+# The speaker fetches this on boot. Each <sourceprovider> tells the speaker a
+# music service exists. The IDs match Bose's known provider IDs (25=TuneIn,
+# 15=Spotify) so preset sourceproviderid references resolve.
+
+SOURCE_PROVIDERS = [
+    ("25", "TUNEIN"),
+    ("15", "SPOTIFY"),
+    ("18", "LOCAL_MUSIC"),
+    ("19", "STORED_MUSIC"),
+]
+
+
+@router.get("/streaming/sourceproviders")
+async def get_source_providers():
+    items = ""
+    for pid, name in SOURCE_PROVIDERS:
+        items += f"""  <sourceprovider id="{pid}">
+    <createdOn>2012-09-19T12:43:00.000+00:00</createdOn>
+    <name>{name}</name>
+    <updatedOn>2012-09-19T12:43:00.000+00:00</updatedOn>
+  </sourceprovider>
+"""
+    return xml_response(f"<sourceProviders>\n{items}</sourceProviders>")
+
+
+# ── Presets ───────────────────────────────────────────────────────────────────
+# The speaker fetches presets on boot and rebuilds its preset buttons + sources.
+# We serve presets stored in SoundFlow's DB, converted to Bose XML format.
+
+async def _load_presets(device_id: str) -> list[dict]:
+    try:
+        async with aiosqlite.connect(settings.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(
+                "SELECT * FROM presets WHERE device_id=? ORDER BY slot", (device_id,)
+            ) as cur:
+                rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning("load presets error: %s", e)
+        return []
+
+
+def _preset_xml(p: dict) -> str:
+    slot = p.get("slot", 0)
+    name = _esc(p.get("name", ""))
+    location = _esc(p.get("location", ""))
+    icon = _esc(p.get("icon_url", ""))
+    source = p.get("source", "TUNEIN")
+    # Map source to provider id
+    provider_id = {"TUNEIN": "25", "SPOTIFY": "15",
+                   "LOCAL_INTERNET_RADIO": "25"}.get(source, "25")
+    content_type = "stationurl" if source in ("TUNEIN", "LOCAL_INTERNET_RADIO") else "tracklisturl"
+    account = _esc(p.get("source_account", ""))
+    return f"""  <preset buttonNumber="{slot}">
+    <containerArt>{icon}</containerArt>
+    <contentItemType>{content_type}</contentItemType>
+    <createdOn>2018-11-26T18:40:45.000+00:00</createdOn>
+    <location>{location}</location>
+    <name>{name}</name>
+    <source id="19989313" type="Audio">
+      <createdOn>2018-08-11T08:55:41.000+00:00</createdOn>
+      <credential type="token">c291bmRmbG93</credential>
+      <name>{account}</name>
+      <sourceproviderid>{provider_id}</sourceproviderid>
+      <sourcename>{account}</sourcename>
+      <sourceSettings/>
+      <updatedOn>2019-07-20T17:48:31.000+00:00</updatedOn>
+      <username>{account}</username>
+    </source>
+    <updatedOn>2018-11-26T18:40:45.000+00:00</updatedOn>
+    <username>{name}</username>
+  </preset>
+"""
+
+
+def _esc(s: str) -> str:
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+@router.get("/streaming/account/{account_id}/device/{device_id}/presets")
+async def get_presets(account_id: str, device_id: str):
+    presets = await _load_presets(device_id)
+    if not presets:
+        # Empty presets: return empty container (not 404, or speaker complains)
+        return xml_response("<presets/>")
+    body = "".join(_preset_xml(p) for p in presets)
+    return xml_response(f"<presets>\n{body}</presets>")
+
+
+@router.put("/streaming/account/{account_id}/device/{device_id}/preset/{button}")
+async def update_preset(account_id: str, device_id: str, button: int, request: Request):
+    body = await request.body()
+    logger.info("preset update button %s on %s (%d bytes)", button, device_id, len(body))
+    return xml_response("<preset/>", status=200)
+
+
+# ── Recents ───────────────────────────────────────────────────────────────────
+
+@router.get("/streaming/account/{account_id}/device/{device_id}/recents")
+async def get_recents(account_id: str, device_id: str):
+    return xml_response("<recents/>")
+
+
+@router.post("/streaming/account/{account_id}/device/{device_id}/recent")
+async def add_recent(account_id: str, device_id: str, request: Request):
+    await request.body()
+    return xml_response("<recent/>", status=201)
+
+
+# ── Account / device bootstrap ────────────────────────────────────────────────
+
+@router.get("/streaming/account/{account_id}/device/{device_id}")
+@router.get("/streaming/account/{account_id}/device/")
+async def account_device(account_id: str, device_id: str = ""):
+    return xml_response(
+        f'<device id="{device_id}"><accountId>{account_id}</accountId>'
+        f'<status>active</status></device>'
+    )
+
+
+@router.get("/streaming/account/{account_id}/devices")
+async def account_devices(account_id: str):
+    return xml_response("<devices/>")
+
+
+# ── BMX registry ──────────────────────────────────────────────────────────────
 
 @router.get("/bmx/registry/v1/services")
 async def bmx_registry():
     base = _base_url()
     services = {
         "services": [
-            {"name": "marge", "url": f"{base}/marge", "version": "1.0"},
+            {"name": "marge", "url": base, "version": "1.0"},
             {"name": "streaming", "url": f"{base}/streaming", "version": "1.0"},
             {"name": "scmudc", "url": f"{base}/v1/scmudc", "version": "1.0"},
-            {"name": "stats", "url": f"{base}", "version": "1.0"},
+            {"name": "stats", "url": base, "version": "1.0"},
             {"name": "swupdate", "url": f"{base}/updates/soundtouch", "version": "1.0"},
         ]
     }
@@ -58,9 +193,6 @@ async def bmx_registry():
 
 
 # ── scmudc event stream ───────────────────────────────────────────────────────
-# The speaker POSTs its state here and long-polls for commands. We accept the
-# event, log it, and return an empty command list (200 OK) so the stream stays
-# alive. Command push (e.g. "play preset") will be added later.
 
 @router.post("/v1/scmudc/{device_id}")
 @router.get("/v1/scmudc/{device_id}")
@@ -70,145 +202,45 @@ async def scmudc(device_id: str, request: Request):
         body = await request.body()
     except Exception:
         pass
-
     if body:
         try:
             event = json.loads(body)
-            logger.info("scmudc event from %s: %s", device_id, _summarize(event))
-            # Full payload logging for protocol research (first 3000 chars)
-            logger.info("scmudc FULL from %s: %s", device_id, json.dumps(event)[:3000])
+            events = event.get("payload", {}).get("events", [])
+            for ev in events:
+                etype = ev.get("type", "?")
+                if etype not in ("balance-changed", "volume-change", "language-changed"):
+                    logger.info("scmudc %s from %s: %s", etype, device_id,
+                                json.dumps(ev.get("data", {}))[:400])
         except Exception:
             logger.debug("scmudc raw from %s: %d bytes", device_id, len(body))
-
-    # Empty envelope: acknowledge, no pending commands
-    return JSONResponse({
-        "deviceId": device_id,
-        "events": [],
-        "timestamp": int(time.time() * 1000),
-    })
+    return JSONResponse({"deviceId": device_id, "events": [],
+                         "timestamp": int(time.time() * 1000)})
 
 
-def _summarize(event) -> str:
-    """Short human-readable summary of an scmudc event for logging."""
-    if isinstance(event, dict):
-        keys = list(event.keys())
-        return f"keys={keys}"
-    if isinstance(event, list):
-        return f"list[{len(event)}]"
-    return str(type(event))
+# ── Software update (always up to date) ───────────────────────────────────────
+
+@router.get("/updates/soundtouch/{path:path}")
+@router.post("/updates/soundtouch/{path:path}")
+async def sw_update(path: str):
+    return xml_response("<update><available>false</available></update>")
 
 
-# ── Marge account service ─────────────────────────────────────────────────────
-# Marge handles the speaker's account. We return a minimal valid account so the
-# speaker considers itself logged in and enables cloud-backed sources.
+# ── Stats / telemetry sink ────────────────────────────────────────────────────
 
-@router.get("/marge/streaming/sourceproviders")
-@router.post("/marge/streaming/sourceproviders")
-async def marge_sourceproviders():
-    return JSONResponse({
-        "sourceProviders": [
-            {"id": "TUNEIN", "name": "TuneIn", "available": True},
-            {"id": "LOCAL_INTERNET_RADIO", "name": "Internet Radio", "available": True},
-            {"id": "SPOTIFY", "name": "Spotify", "available": True},
-        ]
-    })
+@router.post("/streaming/support/{action}")
+async def streaming_support(action: str, request: Request):
+    await request.body()  # drain
+    # power_on legitimately returns 500 per spec; others 200
+    return Response(status_code=200)
 
 
-@router.get("/streaming/account/{account_id}/device/{device_id}")
-@router.get("/streaming/account/{account_id}/device/")
-async def streaming_account_device(account_id: str, device_id: str = ""):
-    """Account bootstrap — echo the device ID with a token so the speaker
-    considers itself paired."""
-    return JSONResponse({
-        "accountId": account_id,
-        "deviceId": device_id,
-        "token": "soundflow-local-token",
-        "status": "active",
-    })
+@router.post("/stats/{path:path}")
+@router.post("/v1/stats/{path:path}")
+async def stats_sink(path: str):
+    return Response(status_code=204)
 
 
-# ── Account full sync — provides the SOURCE LIST ──────────────────────────────
-# This is the critical fix for UNKNOWN_SOURCE_ERROR. After the cloud shutdown,
-# the speaker's Sources.xml collapses to only AUX. The speaker rebuilds its
-# source list from this endpoint on boot. We must declare every source the
-# speaker should be able to use (TUNEIN, LOCAL_INTERNET_RADIO, SPOTIFY, etc.),
-# or /select will reject those sources.
-
-def _account_sources() -> list[dict]:
-    return [
-        {"source": "TUNEIN", "sourceAccount": "TuneIn", "status": "READY",
-         "displayName": "TuneIn", "isLocal": False, "multiroomallowed": True},
-        {"source": "LOCAL_INTERNET_RADIO", "sourceAccount": "", "status": "READY",
-         "displayName": "Internet Radio", "isLocal": False, "multiroomallowed": True},
-        {"source": "SPOTIFY", "sourceAccount": "", "status": "READY",
-         "displayName": "Spotify", "isLocal": False, "multiroomallowed": True},
-        {"source": "STORED_MUSIC", "sourceAccount": "", "status": "READY",
-         "displayName": "Stored Music", "isLocal": False, "multiroomallowed": True},
-        {"source": "AUX", "sourceAccount": "", "status": "READY",
-         "displayName": "AUX", "isLocal": True, "multiroomallowed": True},
-        {"source": "BLUETOOTH", "sourceAccount": "", "status": "READY",
-         "displayName": "Bluetooth", "isLocal": True, "multiroomallowed": False},
-    ]
-
-
-@router.get("/streaming/account/{account_id}/full")
-@router.get("/marge/streaming/account/{account_id}/full")
-async def account_full(account_id: str):
-    """Full account sync including the all-important source list."""
-    return JSONResponse({
-        "accountId": account_id,
-        "sources": _account_sources(),
-        "presets": [],
-        "status": "active",
-    })
-
-
-@router.get("/streaming/sources")
-@router.get("/marge/streaming/sources")
-async def streaming_sources():
-    """Explicit source-list endpoint."""
-    return JSONResponse({"sources": _account_sources()})
-
-
-@router.get("/streaming/sourceproviders")
-async def streaming_sourceproviders_bmx():
-    """
-    The speaker fetches this on boot to rebuild its source list. The response
-    format must declare each source so the speaker adds it to Sources.xml.
-    Without this, Sources.xml collapses to only AUX → UNKNOWN_SOURCE_ERROR.
-    """
-    return JSONResponse({
-        "sourceProviders": [
-            {
-                "sourceName": "TUNEIN",
-                "displayName": "TuneIn",
-                "accountId": "TuneIn",
-                "status": "AVAILABLE",
-                "username": "TuneIn",
-                "sourceAccountName": "TuneIn",
-            },
-            {
-                "sourceName": "LOCAL_INTERNET_RADIO",
-                "displayName": "Internet Radio",
-                "accountId": "",
-                "status": "AVAILABLE",
-            },
-            {
-                "sourceName": "SPOTIFY",
-                "displayName": "Spotify",
-                "accountId": "",
-                "status": "AVAILABLE",
-            },
-        ],
-        "accountSources": [
-            {"source": "TUNEIN", "sourceAccountName": "TuneIn", "status": "AVAILABLE"},
-            {"source": "LOCAL_INTERNET_RADIO", "sourceAccountName": "", "status": "AVAILABLE"},
-            {"source": "SPOTIFY", "sourceAccountName": "", "status": "AVAILABLE"},
-        ],
-    })
-
-
-# ── Streaming catch-all (log everything the speaker asks for) ──────────────────
+# ── Catch-alls (log anything unexpected) ──────────────────────────────────────
 
 @router.api_route("/streaming/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def streaming_catchall(path: str, request: Request):
@@ -217,50 +249,12 @@ async def streaming_catchall(path: str, request: Request):
         body = await request.body()
     except Exception:
         pass
-    logger.info("streaming catch-all: %s /streaming/%s (body: %d bytes)",
+    logger.info("streaming UNHANDLED: %s /streaming/%s (%d bytes)",
                 request.method, path, len(body))
-    if body:
-        logger.info("  body content: %s", body.decode(errors="ignore")[:1500])
-    return JSONResponse({"status": "OK"})
+    return xml_response("<response><status>OK</status></response>")
 
 
-@router.get("/marge/{path:path}")
-@router.post("/marge/{path:path}")
+@router.api_route("/marge/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def marge_catchall(path: str, request: Request):
-    logger.info("marge catch-all: /%s %s", request.method, path)
-    return JSONResponse({"status": "OK"})
-
-
-# ── Streaming support (power, playback commands) ──────────────────────────────
-
-@router.post("/streaming/support/{action}")
-@router.get("/streaming/support/{action}")
-async def streaming_support(action: str, request: Request):
-    """Speaker reports support events (power_on, power_off, etc.). Acknowledge."""
-    logger.info("streaming support: %s", action)
-    return JSONResponse({"status": "OK", "action": action})
-
-
-@router.get("/streaming/device/{device_id}/streaming_token")
-async def streaming_token(device_id: str):
-    """Return a streaming token so the speaker considers itself authorized."""
-    return JSONResponse({
-        "deviceId": device_id,
-        "token": "soundflow-local-streaming-token",
-        "expiresIn": 86400,
-    })
-
-
-# ── Software update (always up to date) ───────────────────────────────────────
-
-@router.get("/updates/soundtouch/{path:path}")
-async def sw_update(path: str):
-    return JSONResponse({"available": False, "mandatory": False})
-
-
-# ── Stats sink (swallow telemetry) ────────────────────────────────────────────
-
-@router.post("/stats/{path:path}")
-@router.post("/v1/stats/{path:path}")
-async def stats_sink(path: str):
-    return Response(status_code=204)
+    logger.info("marge UNHANDLED: %s /marge/%s", request.method, path)
+    return xml_response("<response><status>OK</status></response>")
