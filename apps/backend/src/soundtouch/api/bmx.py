@@ -127,6 +127,49 @@ async def streaming_account_device(account_id: str, device_id: str = ""):
     })
 
 
+# ── Account full sync — provides the SOURCE LIST ──────────────────────────────
+# This is the critical fix for UNKNOWN_SOURCE_ERROR. After the cloud shutdown,
+# the speaker's Sources.xml collapses to only AUX. The speaker rebuilds its
+# source list from this endpoint on boot. We must declare every source the
+# speaker should be able to use (TUNEIN, LOCAL_INTERNET_RADIO, SPOTIFY, etc.),
+# or /select will reject those sources.
+
+def _account_sources() -> list[dict]:
+    return [
+        {"source": "TUNEIN", "sourceAccount": "TuneIn", "status": "READY",
+         "displayName": "TuneIn", "isLocal": False, "multiroomallowed": True},
+        {"source": "LOCAL_INTERNET_RADIO", "sourceAccount": "", "status": "READY",
+         "displayName": "Internet Radio", "isLocal": False, "multiroomallowed": True},
+        {"source": "SPOTIFY", "sourceAccount": "", "status": "READY",
+         "displayName": "Spotify", "isLocal": False, "multiroomallowed": True},
+        {"source": "STORED_MUSIC", "sourceAccount": "", "status": "READY",
+         "displayName": "Stored Music", "isLocal": False, "multiroomallowed": True},
+        {"source": "AUX", "sourceAccount": "", "status": "READY",
+         "displayName": "AUX", "isLocal": True, "multiroomallowed": True},
+        {"source": "BLUETOOTH", "sourceAccount": "", "status": "READY",
+         "displayName": "Bluetooth", "isLocal": True, "multiroomallowed": False},
+    ]
+
+
+@router.get("/streaming/account/{account_id}/full")
+@router.get("/marge/streaming/account/{account_id}/full")
+async def account_full(account_id: str):
+    """Full account sync including the all-important source list."""
+    return JSONResponse({
+        "accountId": account_id,
+        "sources": _account_sources(),
+        "presets": [],
+        "status": "active",
+    })
+
+
+@router.get("/streaming/sources")
+@router.get("/marge/streaming/sources")
+async def streaming_sources():
+    """Explicit source-list endpoint."""
+    return JSONResponse({"sources": _account_sources()})
+
+
 @router.get("/marge/{path:path}")
 @router.post("/marge/{path:path}")
 async def marge_catchall(path: str, request: Request):
