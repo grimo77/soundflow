@@ -67,19 +67,6 @@ async def health():
     return {"status": "ok", "version": "1.0.0"}
 
 
-@app.api_route("/streaming/sourceproviders", methods=["GET", "POST"], include_in_schema=False)
-async def streaming_sourceproviders():
-    """Speakers request this on boot to learn which music services exist."""
-    from fastapi.responses import Response
-    xml = """<?xml version="1.0" encoding="UTF-8"?>
-<sourceProviders>
-  <sourceProvider available="true"><id>TUNEIN</id><name>TuneIn</name></sourceProvider>
-  <sourceProvider available="true"><id>LOCAL_INTERNET_RADIO</id><name>Internet Radio</name></sourceProvider>
-  <sourceProvider available="true"><id>SPOTIFY</id><name>Spotify</name></sourceProvider>
-</sourceProviders>"""
-    return Response(content=xml, media_type="application/xml")
-
-
 # Serve pre-built React frontend in production (Docker)
 # Static dir: /app/static (Docker) or relative in dev
 _static = os.environ.get("STATIC_DIR", os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "static"))

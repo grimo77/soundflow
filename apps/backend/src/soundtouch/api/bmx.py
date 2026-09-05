@@ -170,6 +170,44 @@ async def streaming_sources():
     return JSONResponse({"sources": _account_sources()})
 
 
+@router.get("/streaming/sourceproviders")
+async def streaming_sourceproviders_bmx():
+    """
+    The speaker fetches this on boot to rebuild its source list. The response
+    format must declare each source so the speaker adds it to Sources.xml.
+    Without this, Sources.xml collapses to only AUX → UNKNOWN_SOURCE_ERROR.
+    """
+    return JSONResponse({
+        "sourceProviders": [
+            {
+                "sourceName": "TUNEIN",
+                "displayName": "TuneIn",
+                "accountId": "TuneIn",
+                "status": "AVAILABLE",
+                "username": "TuneIn",
+                "sourceAccountName": "TuneIn",
+            },
+            {
+                "sourceName": "LOCAL_INTERNET_RADIO",
+                "displayName": "Internet Radio",
+                "accountId": "",
+                "status": "AVAILABLE",
+            },
+            {
+                "sourceName": "SPOTIFY",
+                "displayName": "Spotify",
+                "accountId": "",
+                "status": "AVAILABLE",
+            },
+        ],
+        "accountSources": [
+            {"source": "TUNEIN", "sourceAccountName": "TuneIn", "status": "AVAILABLE"},
+            {"source": "LOCAL_INTERNET_RADIO", "sourceAccountName": "", "status": "AVAILABLE"},
+            {"source": "SPOTIFY", "sourceAccountName": "", "status": "AVAILABLE"},
+        ],
+    })
+
+
 # ── Streaming catch-all (log everything the speaker asks for) ──────────────────
 
 @router.api_route("/streaming/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
@@ -181,6 +219,8 @@ async def streaming_catchall(path: str, request: Request):
         pass
     logger.info("streaming catch-all: %s /streaming/%s (body: %d bytes)",
                 request.method, path, len(body))
+    if body:
+        logger.info("  body content: %s", body.decode(errors="ignore")[:1500])
     return JSONResponse({"status": "OK"})
 
 
