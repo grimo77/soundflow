@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from soundtouch.api import devices, presets, radio, zones, system, spotify, cloud
 from soundtouch.api import setup as setup_api
 from soundtouch.api import radio_adapter
+from soundtouch.api import bmx
 from soundtouch.api import websocket as ws_router
 from soundtouch.ws import device_poller
 from soundtouch.discovery import DeviceDiscovery
@@ -58,6 +59,7 @@ app.include_router(ws_router.router, tags=["websocket"])
 app.include_router(setup_api.router, prefix="/api/setup", tags=["setup"])
 app.include_router(cloud.router, prefix="/cloudws", tags=["cloud"])
 app.include_router(radio_adapter.router, tags=["radio_adapter"])
+app.include_router(bmx.router, tags=["bmx"])
 
 
 @app.get("/health")
