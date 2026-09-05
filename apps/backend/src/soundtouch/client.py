@@ -265,14 +265,48 @@ class SoundTouchClient:
         except Exception:
             return []
 
-    async def set_spotify_account(self, email: str, blob_id: str = "", token: str = "") -> None:
+    async def set_spotify_account(self, email: str, blob_id: str = "", token: str = "") -> str:
         """
         Link a Spotify account to the speaker so it can play Spotify sources.
+        Firmware versions differ, so we try the documented endpoints in order.
+
+        Note: On most speakers Spotify is already linked via the Bose app and
+        stored on the device. In that case this call is optional — SoundFlow
+        only needs the email to reference the existing account when playing.
         """
-        body = f"""<credentials>
+        # Variant A: official setMusicServiceAccount (most common)
+        account_body = f"""<credentials source="SPOTIFY" displayName="{email}">
+  <user>{email}</user>
+  <pass>{token}</pass>
+</credentials>"""
+        # Variant B: OAuth-based account
+        oauth_body = f"""<credentials source="SPOTIFY" displayName="{email}">
+  <sourceAccount>{email}</sourceAccount>
+  <token>{token}</token>
+</credentials>"""
+        # Variant C: legacy setCredentials
+        legacy_body = f"""<credentials>
   <source>SPOTIFY</source>
   <sourceAccount>{email}</sourceAccount>
   <blobId>{blob_id}</blobId>
   <token>{token}</token>
 </credentials>"""
-        await self.post("/setCredentials", body)
+
+        attempts = [
+            ("/setMusicServiceAccount", account_body),
+            ("/setMusicServiceOAuthAccount", oauth_body),
+            ("/setCredentials", legacy_body),
+        ]
+        last_error = None
+        for path, body in attempts:
+            try:
+                await self.post(path, body)
+                return path
+            except Exception as e:
+                last_error = e
+                continue
+        raise RuntimeError(
+            f"Kein unterstützter Spotify-Endpunkt gefunden. Das Gerät hat "
+            f"Spotify vermutlich bereits über die Bose-App gespeichert — die "
+            f"E-Mail wird nur zur Referenz benötigt. Letzter Fehler: {last_error}"
+        )

@@ -127,8 +127,10 @@ export default function SetupPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ device_id: selected.id, email: spotifyEmail }),
       });
-      if (!r.ok) throw new Error((await r.json()).detail);
-      showToast("✅ Spotify-Account gespeichert!");
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail);
+      // Backend may return a note when the device already had Spotify linked
+      showToast(data.note ? `✅ ${data.note}` : "✅ Spotify-Account gespeichert!");
     } catch (e: unknown) {
       showToast(`Fehler: ${e instanceof Error ? e.message : "Unbekannt"}`);
     }

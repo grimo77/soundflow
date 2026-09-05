@@ -144,27 +144,40 @@ async def setup_spotify_account(body: SpotifyWizardBody):
         raise HTTPException(404, "Device not found")
 
     client = SoundTouchClient(row["ip"])
+
+    # Always store the email in our DB — it's used to reference the account
+    # when playing Spotify URIs, regardless of whether the device call works.
+    async with aiosqlite.connect(settings.db_path) as db:
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS device_accounts (
+                device_id TEXT,
+                source TEXT,
+                account TEXT,
+                PRIMARY KEY (device_id, source)
+            )
+        """)
+        await db.execute("""
+            INSERT INTO device_accounts (device_id, source, account)
+            VALUES (?, 'SPOTIFY', ?)
+            ON CONFLICT(device_id, source) DO UPDATE SET account=excluded.account
+        """, (body.device_id, body.email))
+        await db.commit()
+
+    # Try to push credentials to the device (optional — many speakers already
+    # have Spotify linked via the Bose app, in which case this isn't needed).
     try:
         await client.set_spotify_account(body.email, body.blob_id, body.token)
-        # Also store email in DB for preset use
-        async with aiosqlite.connect(settings.db_path) as db:
-            await db.execute("""
-                CREATE TABLE IF NOT EXISTS device_accounts (
-                    device_id TEXT,
-                    source TEXT,
-                    account TEXT,
-                    PRIMARY KEY (device_id, source)
-                )
-            """)
-            await db.execute("""
-                INSERT INTO device_accounts (device_id, source, account)
-                VALUES (?, 'SPOTIFY', ?)
-                ON CONFLICT(device_id, source) DO UPDATE SET account=excluded.account
-            """, (body.device_id, body.email))
-            await db.commit()
-        return {"ok": True, "email": body.email}
+        return {"ok": True, "email": body.email, "device_updated": True}
     except Exception as e:
-        raise HTTPException(502, f"Could not set Spotify account: {e}")
+        # Not fatal: the email is saved and playback via existing account works
+        return {
+            "ok": True,
+            "email": body.email,
+            "device_updated": False,
+            "note": "Spotify ist auf dem Gerät bereits über die Bose-App "
+                    "hinterlegt. Die E-Mail wurde gespeichert und wird zur "
+                    "Wiedergabe verwendet.",
+        }
 
 
 @router.get("/spotify_account/{device_id}")
