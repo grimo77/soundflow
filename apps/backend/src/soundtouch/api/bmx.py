@@ -55,6 +55,7 @@ def _base_url() -> str:
 SOURCE_PROVIDERS = [
     ("25", "TUNEIN"),
     ("15", "SPOTIFY"),
+    ("11", "LOCAL_INTERNET_RADIO"),
     ("18", "LOCAL_MUSIC"),
     ("19", "STORED_MUSIC"),
 ]
@@ -91,10 +92,26 @@ async def _load_presets(device_id: str) -> list[dict]:
         return []
 
 
+def _rewrite_location(location: str) -> str:
+    """
+    Rewrite legacy Bose adapter URLs to point at SoundFlow's real address.
+    Old presets reference content.api.bose.io which resolves (via the speaker's
+    /etc/hosts) to SoundFlow's IP but on port 80. We rewrite the host:port to
+    SoundFlow's actual IP:port so the stream proxy is reached correctly.
+    """
+    if not location:
+        return location
+    base = f"{get_local_ip()}:{settings.port}"
+    # Replace the Bose adapter host (with or without port) with our real address
+    location = location.replace("content.api.bose.io:7777", base)
+    location = location.replace("content.api.bose.io", base)
+    return location
+
+
 def _preset_xml(p: dict) -> str:
     slot = p.get("slot", 0)
     name = _esc(p.get("name", ""))
-    location = _esc(p.get("location", ""))
+    location = _esc(_rewrite_location(p.get("location", "")))
     icon = _esc(p.get("icon_url", ""))
     source = p.get("source", "TUNEIN")
     # Map source to provider id

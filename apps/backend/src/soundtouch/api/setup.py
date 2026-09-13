@@ -15,6 +15,7 @@ import aiosqlite
 from soundtouch.client import SoundTouchClient
 from soundtouch.config import settings
 from soundtouch.network import get_local_ip, get_local_url
+from soundtouch.setup_session import execute_init_plan, SetupSessionError
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -200,4 +201,58 @@ async def get_spotify_account(device_id: str):
                 row = await cur.fetchone()
         return {"email": row["account"] if row else ""}
     except Exception as e:
+        raise HTTPException(500, str(e))
+
+
+# ── Full WebSocket pairing (the fix for inactive sources) ─────────────────────
+# Redirecting URLs and calling /setMargeAccount over plain HTTP is not enough:
+# the speaker firmware only activates its sources (AUX, LOCAL_INTERNET_RADIO,
+# TUNEIN, ...) after a full pass through the WebSocket SETUP state machine
+# on port 8080. This endpoint drives that sequence end-to-end.
+
+class PairAccountBody(BaseModel):
+    device_id: str
+    account_id: str = ""       # auto-generated if empty
+    device_name: str = ""      # optional rename during pairing
+    language: int = 0          # 0 = English; speaker-specific codes apply
+
+
+def _generate_account_id() -> str:
+    import random
+    return str(random.randint(1000000, 9999999))
+
+
+@router.post("/pair_account")
+async def pair_account(body: PairAccountBody):
+    """
+    Run the complete WebSocket setup state machine to properly pair the
+    speaker with a local Marge account. This is the step that actually
+    activates sources — the HTTP-only /redirect_cloud endpoint is not
+    sufficient on its own.
+    """
+    async with aiosqlite.connect(settings.db_path) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT ip FROM devices WHERE id=?", (body.device_id,)) as cur:
+            row = await cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Device not found")
+
+    account_id = body.account_id or _generate_account_id()
+    bose_server = f"{get_local_ip()}:{settings.port}"
+    bose_server_url = f"http://{bose_server}"
+
+    try:
+        steps = await execute_init_plan(
+            ip=row["ip"],
+            device_id=body.device_id,
+            account_id=account_id,
+            bose_server=bose_server_url,
+            device_name=body.device_name,
+            language=body.language,
+        )
+        return {"ok": True, "account_id": account_id, "steps": steps}
+    except SetupSessionError as e:
+        raise HTTPException(502, f"Pairing fehlgeschlagen: {e}")
+    except Exception as e:
+        logger.exception("pair_account unexpected error")
         raise HTTPException(500, str(e))
